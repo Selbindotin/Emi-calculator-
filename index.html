@@ -1,22 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>EMI Calculator</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    .fade-in {
-      animation: fadeIn 0.7s ease-in-out;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    @media print {
-      .no-print { display: none; }
-    }
+    .fade-in { animation: fadeIn 0.7s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @media print { .no-print { display: none; } }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-800 flex items-center justify-center min-h-screen p-4">
@@ -28,7 +22,7 @@
       <input type="number" id="amount" placeholder="Loan Amount (₹)" class="w-full p-2 border rounded-md" />
       <input type="number" id="rate" placeholder="Interest Rate (% per annum)" class="w-full p-2 border rounded-md" />
       <input type="number" id="term" placeholder="Loan Term (months)" class="w-full p-2 border rounded-md" />
-      <input type="number" id="moratorium" placeholder="Moratorium Period (months)" class="w-full p-2 border rounded-md" />
+      <input type="number" id="moratorium" placeholder="Moratorium Period (months, optional)" class="w-full p-2 border rounded-md" />
     </div>
 
     <button onclick="calculateEMI()" class="mt-4 bg-green-600 hover:bg-green-700 text-white w-full p-3 rounded-md text-lg font-semibold transition">Calculate</button>
@@ -39,8 +33,11 @@
       <div><strong>Total Payment:</strong> ₹<span id="total"></span></div>
     </div>
 
+    <canvas id="emiChart" class="my-4 hidden"></canvas>
+
     <div id="chartSection" class="mt-6 hidden fade-in">
       <h3 class="text-lg font-semibold mb-2">📅 EMI Payment Schedule</h3>
+      <select id="yearFilter" class="mb-2 w-full p-2 border rounded-md"></select>
       <div class="overflow-x-auto max-h-64">
         <table class="min-w-full text-sm border" id="scheduleTable">
           <thead class="bg-gray-200 sticky top-0">
@@ -61,11 +58,15 @@
   </div>
 
   <script>
+    let schedule = [];
+    let moratoriumInterest = 0;
+
     function calculateEMI() {
       const principal = parseFloat(document.getElementById('amount').value);
       const rate = parseFloat(document.getElementById('rate').value);
       const term = parseInt(document.getElementById('term').value);
-      const moratorium = parseInt(document.getElementById('moratorium').value);
+      let moratorium = parseInt(document.getElementById('moratorium').value);
+      moratorium = isNaN(moratorium) ? 0 : moratorium;
 
       if (!principal || !rate || !term || moratorium > term) {
         alert("Please enter valid values.");
@@ -73,23 +74,26 @@
       }
 
       const monthlyRate = rate / 12 / 100;
-      let interestMoratorium = principal * monthlyRate * moratorium;
-      let balance = principal + interestMoratorium;
+      moratoriumInterest = principal * monthlyRate * moratorium;
+      let balance = principal + moratoriumInterest;
       const effectiveTerm = term - moratorium;
       const emi = (balance * monthlyRate * Math.pow(1 + monthlyRate, effectiveTerm)) / (Math.pow(1 + monthlyRate, effectiveTerm) - 1);
-      let totalPayment = 0;
-      let totalInterest = interestMoratorium;
+      let totalPayment = moratoriumInterest;
+      let totalInterest = moratoriumInterest;
 
-      // Update results
       document.getElementById('emi').innerText = emi.toFixed(2);
-      document.getElementById('interest').innerText = '...'; // updated after schedule
-      document.getElementById('total').innerText = '...';    // updated after schedule
       document.getElementById('result').classList.remove('hidden');
 
-      // Build table
-      const tbody = document.getElementById('tableBody');
-      tbody.innerHTML = '';
-      let schedule = [];
+      schedule = [];
+
+      // Moratorium table rows
+      for (let i = 1; i <= moratorium; i++) {
+        const interestOnly = principal * monthlyRate;
+        totalPayment += interestOnly;
+        schedule.push([i, 0, interestOnly.toFixed(2), 0, principal.toFixed(2)]);
+      }
+
+      // EMI repayment
       for (let i = 1; i <= effectiveTerm; i++) {
         const interestPart = balance * monthlyRate;
         const principalPart = emi - interestPart;
@@ -97,30 +101,74 @@
         if (balance < 0) balance = 0;
         totalInterest += interestPart;
         totalPayment += emi;
-
-        schedule.push([
-          i + moratorium,
-          emi.toFixed(2),
-          interestPart.toFixed(2),
-          principalPart.toFixed(2),
-          balance.toFixed(2)
-        ]);
+        schedule.push([i + moratorium, emi.toFixed(2), interestPart.toFixed(2), principalPart.toFixed(2), balance.toFixed(2)]);
       }
 
-      schedule.forEach(row => {
-        const tr = document.createElement('tr');
-        row.forEach(cell => {
-          const td = document.createElement('td');
-          td.className = "border px-2 py-1 text-center";
-          td.innerText = cell;
-          tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
+      document.getElementById('interest').innerText = totalInterest.toFixed(2);
+      document.getElementById('total').innerText = totalPayment.toFixed(2);
+      document.getElementById('chartSection').classList.remove('hidden');
+      buildScheduleTable();
+      buildChart();
+    }
+
+    function buildScheduleTable() {
+      const tbody = document.getElementById('tableBody');
+      const yearFilter = document.getElementById('yearFilter');
+      tbody.innerHTML = '';
+      yearFilter.innerHTML = '<option value="all">All Years</option>';
+
+      const years = new Set();
+      schedule.forEach(row => years.add(Math.ceil(row[0]/12)));
+      years.forEach(y => {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.text = `Year ${y}`;
+        yearFilter.appendChild(opt);
       });
 
-      document.getElementById('interest').innerText = totalInterest.toFixed(2);
-      document.getElementById('total').innerText = (principal + totalInterest).toFixed(2);
-      document.getElementById('chartSection').classList.remove('hidden');
+      yearFilter.onchange = function() {
+        tbody.innerHTML = '';
+        const selected = this.value;
+        schedule.forEach(row => {
+          if (selected === 'all' || Math.ceil(row[0]/12) == selected) {
+            const tr = document.createElement('tr');
+            row.forEach(cell => {
+              const td = document.createElement('td');
+              td.className = "border px-2 py-1 text-center";
+              td.innerText = cell;
+              tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+          }
+        });
+      }
+
+      yearFilter.dispatchEvent(new Event('change'));
+    }
+
+    function buildChart() {
+      const ctx = document.getElementById('emiChart').getContext('2d');
+      const emi = parseFloat(document.getElementById('emi').innerText);
+      const totalInterest = parseFloat(document.getElementById('interest').innerText);
+      const principal = parseFloat(document.getElementById('amount').value);
+      document.getElementById('emiChart').classList.remove('hidden');
+      if (window.chart) window.chart.destroy();
+      window.chart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Principal', 'Interest'],
+          datasets: [{
+            data: [principal, totalInterest],
+            backgroundColor: ['#34d399', '#f87171']
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: 'bottom' }
+          }
+        }
+      });
     }
 
     async function downloadPDF() {
@@ -129,23 +177,20 @@
 
       doc.setFontSize(14);
       doc.text("EMI Calculator Report", 20, 20);
-
       doc.setFontSize(10);
-      doc.text("Monthly EMI: ₹" + document.getElementById('emi').innerText, 20, 30);
-      doc.text("Total Interest: ₹" + document.getElementById('interest').innerText, 20, 36);
-      doc.text("Total Payment: ₹" + document.getElementById('total').innerText, 20, 42);
-
-      // Table Header
-      const headers = [["Month", "EMI", "Interest", "Principal", "Balance"]];
-      const body = Array.from(document.querySelectorAll('#tableBody tr')).map(tr =>
-        Array.from(tr.children).map(td => td.innerText)
-      );
+      doc.text("Loan Amount: ₹" + document.getElementById('amount').value, 20, 30);
+      doc.text("Interest Rate: " + document.getElementById('rate').value + "%", 20, 36);
+      doc.text("Term: " + document.getElementById('term').value + " months", 20, 42);
+      doc.text("Moratorium: " + (document.getElementById('moratorium').value || 0) + " months", 20, 48);
+      doc.text("Monthly EMI: ₹" + document.getElementById('emi').innerText, 20, 54);
+      doc.text("Total Interest: ₹" + document.getElementById('interest').innerText, 20, 60);
+      doc.text("Total Payment: ₹" + document.getElementById('total').innerText, 20, 66);
 
       doc.autoTable({
-        head: headers,
-        body: body,
-        startY: 50,
-        styles: { fontSize: 8 },
+        head: [['Month', 'EMI', 'Interest', 'Principal', 'Balance']],
+        body: schedule.map(row => row.map(col => col.toString())),
+        startY: 75,
+        styles: { fontSize: 8 }
       });
 
       doc.save("emi-calculator.pdf");
