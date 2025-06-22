@@ -59,7 +59,6 @@
 
   <script>
     let schedule = [];
-    let moratoriumInterest = 0;
 
     function calculateEMI() {
       const principal = parseFloat(document.getElementById('amount').value);
@@ -74,26 +73,25 @@
       }
 
       const monthlyRate = rate / 12 / 100;
-      moratoriumInterest = principal * monthlyRate * moratorium;
-      let balance = principal + moratoriumInterest;
-      const effectiveTerm = term - moratorium;
-      const emi = (balance * monthlyRate * Math.pow(1 + monthlyRate, effectiveTerm)) / (Math.pow(1 + monthlyRate, effectiveTerm) - 1);
-      let totalPayment = moratoriumInterest;
-      let totalInterest = moratoriumInterest;
-
-      document.getElementById('emi').innerText = emi.toFixed(2);
-      document.getElementById('result').classList.remove('hidden');
+      let balance = principal;
+      let totalInterest = 0;
+      let totalPayment = 0;
 
       schedule = [];
 
-      // Moratorium table rows
+      // Moratorium period: interest accrues and is added to balance
       for (let i = 1; i <= moratorium; i++) {
-        const interestOnly = principal * monthlyRate;
+        const interestOnly = balance * monthlyRate;
+        balance += interestOnly;
+        totalInterest += interestOnly;
         totalPayment += interestOnly;
-        schedule.push([i, 0, interestOnly.toFixed(2), 0, principal.toFixed(2)]);
+        schedule.push([i, 0, interestOnly.toFixed(2), 0, balance.toFixed(2)]);
       }
 
       // EMI repayment
+      const effectiveTerm = term - moratorium;
+      const emi = (balance * monthlyRate * Math.pow(1 + monthlyRate, effectiveTerm)) / (Math.pow(1 + monthlyRate, effectiveTerm) - 1);
+
       for (let i = 1; i <= effectiveTerm; i++) {
         const interestPart = balance * monthlyRate;
         const principalPart = emi - interestPart;
@@ -104,8 +102,10 @@
         schedule.push([i + moratorium, emi.toFixed(2), interestPart.toFixed(2), principalPart.toFixed(2), balance.toFixed(2)]);
       }
 
+      document.getElementById('emi').innerText = emi.toFixed(2);
       document.getElementById('interest').innerText = totalInterest.toFixed(2);
       document.getElementById('total').innerText = totalPayment.toFixed(2);
+      document.getElementById('result').classList.remove('hidden');
       document.getElementById('chartSection').classList.remove('hidden');
       buildScheduleTable();
       buildChart();
@@ -148,7 +148,6 @@
 
     function buildChart() {
       const ctx = document.getElementById('emiChart').getContext('2d');
-      const emi = parseFloat(document.getElementById('emi').innerText);
       const totalInterest = parseFloat(document.getElementById('interest').innerText);
       const principal = parseFloat(document.getElementById('amount').value);
       document.getElementById('emiChart').classList.remove('hidden');
